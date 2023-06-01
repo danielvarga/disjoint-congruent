@@ -1,5 +1,6 @@
 import numpy as np
 import cvxpy as cp
+import matplotlib.pyplot as plt
 
 
 n = 12
@@ -69,7 +70,16 @@ def pretty(w):
         print()
 
 
+def pretty_congruence(t):
+    x, y, rot, mirr = t
+    return f"x={x} y={y} rot={90 * rot} refl={'yes' if mirr else 'no'}"
+
+
 def standard_translations():
+    return [(0, 0, 0, False),
+        (0*1, 2, 2, False),
+        (0*1, 0, 2, False)]
+
     assert n % 3 == 0
     t1 = (0, 0, 0, False)
     t2 = (0, n // 3, 0, False)
@@ -96,6 +106,13 @@ w = [[cp.Variable(name=f"w[{i},{j}]") for j in range(n)] for i in range(n)]
 w = np.array(w, dtype=object)
 
 
+def prefilter_congruence(t, k):
+    w1 = np.ones((n, n), dtype=int)
+    translate, zero_sum = apply(w1, t)
+    survives = translate.sum() * k >= w1.sum()
+    return survives
+
+
 # takes a list of congruences, return a pair (density, solution)
 # where density is the ratio of the square that can be covered by (soft) disjoint congruent
 # versions of some (soft) subset of the square.
@@ -108,9 +125,8 @@ def evaluate_congruences(ts):
     translates = np.array([translates_and_zero_sum[0] for translates_and_zero_sum in translates_and_zero_sums])
     zero_sums =  np.array([translates_and_zero_sum[1] for translates_and_zero_sum in translates_and_zero_sums])
     s = translates.sum(axis=0)
-    constraints += [s[i, j] <= 1 for i in range(n) for j in range(n)]
     constraints += [zero_sum == 0 for zero_sum in zero_sums]
-
+    constraints += [s[i, j] <= 1 for i in range(n) for j in range(n)]
     lp = cp.Problem(
         cp.Maximize(np.sum(s)),
         constraints=constraints
@@ -120,29 +136,73 @@ def evaluate_congruences(ts):
     return lp.value / n ** 2, solution
 
 
+def random_congruences(k):
+    ts = [(0, 0, 0, False)] # the identity is always in there
+    while len(ts) < k:
+        t = random_congruence(use_reflection=False)
+        if prefilter_congruence(t, k):
+            ts.append(t)
+    return ts
+
+
 np.random.seed(2)
 
-best = 0
-for _ in range(10000):
-    ts = [random_congruence(use_reflection=False) for _ in range(3)]
-    # ts = standard_translations()
+k = 3
+best_density = 0
+best_ts = None
+iteration = 0
+while True:
+    ts = random_congruences(k)
+    iteration += 1
+
     density, solution = evaluate_congruences(ts)
-    print(f"best {best:0.3f} current {density:0.2f}")
-    if density > best:
-        best = density
-    if density > 0.6:
+    if density > best_density:
+        best_density = density
+        best_ts = ts
+    if iteration % 10 == 0:
+        print(f"attempt {iteration} current best density {best_density}")
+    if iteration >= 20:
         break
 
-print("the disjoint congruent versions can cover at most this ratio of the square:", density)
+print(f"finishing after {iteration} tries.")
 
-import matplotlib.pyplot as plt
-plt.imshow(solution)
-plt.show()
+ts = best_ts
+density, solution = evaluate_congruences(ts)
+
+print("the disjoint congruent versions can cover at most this ratio of the square:", density)
+for t in ts:
+    print(t)
+
+'''
+fig, axs = plt.subplots(2, k, sharex=True, sharey=True)
+fig = plt.figure()
+gs = fig.add_gridspec(2, k, hspace=0, wspace=0)
+row1, row2 = gs.subplots(sharex='col', sharey='row')
+'''
+
+fig, axs = plt.subplots(2, k, figsize=(4 * k, 8))
+fig.suptitle(f"Density {density:.3f} partial cover\nWarning: the bottom row gradients are not parts of the set.")
+axs[0, 0].imshow(solution, vmin=0)
+axs[0, 0].set_title("Optimal solution")
 
 translates_and_zero_sums = [apply(solution, t) for t in ts]
 translates = np.array([translates_and_zero_sum[0] for translates_and_zero_sum in translates_and_zero_sums])
 
 s = np.array(translates).sum(axis=0)
 
-plt.imshow(s)
+axs[0, 1].imshow(s, vmin=0)
+axs[0, 1].set_title("Partial cover")
+
+
+lin = np.linspace(0, 0.5, n)
+xa, xb = np.meshgrid(lin, lin)
+w_rainbow = xa + xb
+
+for column, t in enumerate(ts):
+    translate_rainbow, zero_sum = apply(w_rainbow, t)
+    translate_solution, zero_sum = apply(solution, t)
+    ax = axs[1, column]
+    ax.imshow(translate_solution + translate_rainbow, vmin=0)
+    ax.set_title(pretty_congruence(t))
+
 plt.show()
