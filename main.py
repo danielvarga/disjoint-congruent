@@ -3,8 +3,6 @@ import cvxpy as cp
 import matplotlib.pyplot as plt
 
 
-n = 12
-
 
 def apply(w, t):
     x, y, rot, mirr = t
@@ -88,7 +86,7 @@ def standard_translations():
     return ts
 
 
-def random_congruence(use_rotation=True, use_reflection=True):
+def random_congruence(n, use_rotation=True, use_reflection=True):
     x = np.random.randint(-n , n)
     y = np.random.randint(-n , n)
     if use_rotation:
@@ -102,11 +100,7 @@ def random_congruence(use_rotation=True, use_reflection=True):
     return x, y, rot, mirror
 
 
-w = [[cp.Variable(name=f"w[{i},{j}]") for j in range(n)] for i in range(n)]
-w = np.array(w, dtype=object)
-
-
-def prefilter_congruence(t, k):
+def prefilter_congruence(n, t, k):
     w1 = np.ones((n, n), dtype=int)
     translate, zero_sum = apply(w1, t)
     survives = translate.sum() * k >= w1.sum()
@@ -117,7 +111,8 @@ def prefilter_congruence(t, k):
 # where density is the ratio of the square that can be covered by (soft) disjoint congruent
 # versions of some (soft) subset of the square.
 # the congruent versions must stay inside the square.
-def evaluate_congruences(ts):
+def evaluate_congruences(w, ts):
+    n = len(w)
     constraints =  [w[i, j] >= 0 for i in range(n) for j in range(n)]
     constraints += [w[i, j] <= 1 for i in range(n) for j in range(n)]
 
@@ -136,73 +131,84 @@ def evaluate_congruences(ts):
     return lp.value / n ** 2, solution
 
 
-def random_congruences(k):
+def random_congruences(n, k):
     ts = [(0, 0, 0, False)] # the identity is always in there
     while len(ts) < k:
-        t = random_congruence(use_reflection=False)
-        if prefilter_congruence(t, k):
+        t = random_congruence(n, use_reflection=False)
+        if prefilter_congruence(n, t, k):
             ts.append(t)
     return ts
 
 
-np.random.seed(2)
 
-k = 3
-best_density = 0
-best_ts = None
-iteration = 0
-while True:
-    ts = random_congruences(k)
-    iteration += 1
+def visualize_solution(w, ts):
+    density, solution = evaluate_congruences(w, ts)
 
-    density, solution = evaluate_congruences(ts)
-    if density > best_density:
-        best_density = density
-        best_ts = ts
-    if iteration % 10 == 0:
-        print(f"attempt {iteration} current best density {best_density}")
-    if iteration >= 20:
-        break
+    print("the disjoint congruent versions can cover at most this ratio of the square:", density)
+    for t in ts:
+        print(pretty_congruence(t))
 
-print(f"finishing after {iteration} tries.")
+    n = len(w)
+    k = len(ts)
+    fig, axs = plt.subplots(2, k, figsize=(4 * k, 8))
+    fig.suptitle(f"Density {density:.3f} partial cover\nWarning: the bottom row gradients are not parts of the set.")
+    axs[0, 0].imshow(solution, vmin=0)
+    axs[0, 0].set_title("Optimal solution")
 
-ts = best_ts
-density, solution = evaluate_congruences(ts)
+    translates_and_zero_sums = [apply(solution, t) for t in ts]
+    translates = np.array([translates_and_zero_sum[0] for translates_and_zero_sum in translates_and_zero_sums])
 
-print("the disjoint congruent versions can cover at most this ratio of the square:", density)
-for t in ts:
-    print(t)
+    s = np.array(translates).sum(axis=0)
 
-'''
-fig, axs = plt.subplots(2, k, sharex=True, sharey=True)
-fig = plt.figure()
-gs = fig.add_gridspec(2, k, hspace=0, wspace=0)
-row1, row2 = gs.subplots(sharex='col', sharey='row')
-'''
-
-fig, axs = plt.subplots(2, k, figsize=(4 * k, 8))
-fig.suptitle(f"Density {density:.3f} partial cover\nWarning: the bottom row gradients are not parts of the set.")
-axs[0, 0].imshow(solution, vmin=0)
-axs[0, 0].set_title("Optimal solution")
-
-translates_and_zero_sums = [apply(solution, t) for t in ts]
-translates = np.array([translates_and_zero_sum[0] for translates_and_zero_sum in translates_and_zero_sums])
-
-s = np.array(translates).sum(axis=0)
-
-axs[0, 1].imshow(s, vmin=0)
-axs[0, 1].set_title("Partial cover")
+    axs[0, 1].imshow(s, vmin=0)
+    axs[0, 1].set_title("Partial cover")
 
 
-lin = np.linspace(0, 0.5, n)
-xa, xb = np.meshgrid(lin, lin)
-w_rainbow = xa + xb
+    lin = np.linspace(0, 0.5, n)
+    xa, xb = np.meshgrid(lin, lin)
+    w_rainbow = xa + xb
 
-for column, t in enumerate(ts):
-    translate_rainbow, zero_sum = apply(w_rainbow, t)
-    translate_solution, zero_sum = apply(solution, t)
-    ax = axs[1, column]
-    ax.imshow(translate_solution + translate_rainbow, vmin=0)
-    ax.set_title(pretty_congruence(t))
+    for column, t in enumerate(ts):
+        translate_rainbow, zero_sum = apply(w_rainbow, t)
+        translate_solution, zero_sum = apply(solution, t)
+        ax = axs[1, column]
+        ax.imshow(translate_solution + translate_rainbow, vmin=0)
+        ax.set_title(pretty_congruence(t))
 
-plt.show()
+    plt.show()
+
+
+def main():
+    np.random.seed(2)
+
+    # the size of the grid
+    n = 12
+    # the number of congruences
+    k = 3
+
+    w = [[cp.Variable(name=f"w[{i},{j}]") for j in range(n)] for i in range(n)]
+    w = np.array(w, dtype=object)
+
+    best_density = 0
+    best_ts = None
+    iteration = 0
+    while True:
+        ts = random_congruences(n, k)
+        iteration += 1
+
+        density, solution = evaluate_congruences(w, ts)
+        if density > best_density:
+            best_density = density
+            best_ts = ts
+        if iteration % 10 == 0:
+            print(f"attempt {iteration} current best density {best_density}")
+        if iteration >= 20:
+            break
+
+    print(f"finishing after {iteration} tries.")
+
+    visualize_solution(w, best_ts)
+
+
+if __name__ == "__main__":
+    main()
